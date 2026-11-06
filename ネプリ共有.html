@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+  <title>ネットプリント共有</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Vue.js 3 CDN -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <!-- Supabase JS Client CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    /* Vueマウント前の未コンパイル構文（{{ }}）の露出防止 */
+    [v-cloak] {
+      display: none !important;
+    }
+
+    /* Apple HIG準拠：システムフォント・タッチフィードバック最適化 */
+    :root {
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro JP", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+      padding-bottom: env(safe-area-inset-bottom);
+      padding-left: env(safe-area-inset-left);
+      padding-right: env(safe-area-inset-right);
+    }
+    input, textarea {
+      user-select: text;
+    }
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen antialiased flex flex-col">
+  <div id="app" v-cloak class="flex-1 flex flex-col min-h-screen">
+    
+    <!-- ナビゲーションバー (Dynamic Island・ノッチ干渉防止 & ミニマルデザイン) -->
+    <header class="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-200/80 px-4 sm:px-6 lg:px-8 pb-3 flex items-center justify-between transition-all"
+            style="padding-top: calc(env(safe-area-inset-top, 0px) + 0.6rem);">
+      <div class="flex items-center space-x-2">
+        <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-white shadow-sm active:scale-95 transition">
+          <i data-lucide="printer" class="w-5 h-5"></i>
+        </div>
+        <span class="text-[10px] text-slate-300 font-mono tracking-tighter select-none">v1.5.0</span>
+      </div>
+
+      <div class="flex items-center space-x-2">
+        <button @click="openModal()" 
+                class="min-h-[44px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-medium text-sm rounded-xl shadow-sm transition flex items-center gap-1.5">
+          <i data-lucide="plus-circle" class="w-4 h-4"></i>
+          <span>登録する</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- メインコンテンツ領域 -->
+    <main class="flex-1 max-w-5xl w-full mx-auto pb-8">
+      
+      <!-- 検索・タグエリア -->
+      <section class="p-3 sm:p-4 space-y-2.5">
+        <!-- 検索バー -->
+        <div class="relative w-full">
+          <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2"></i>
+          <input 
+            v-model="searchQuery" 
+            type="text" 
+            placeholder="タイトル、タグ、予約番号(8桁)で検索..." 
+            class="w-full pl-10 pr-9 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition shadow-sm"
+          >
+          <button 
+            v-if="searchQuery" 
+            @click="searchQuery = ''" 
+            class="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600"
+          >
+            <i data-lucide="x-circle" class="w-4 h-4"></i>
+          </button>
+        </div>
+
+        <!-- タグ検索アコーディオン（初期は閉じた状態） -->
+        <div v-if="allExistingTags.length > 0" class="bg-white border border-slate-200/80 rounded-xl shadow-2xs overflow-hidden transition-all">
+          <button 
+            type="button"
+            @click="toggleTagAccordion" 
+            class="w-full px-3.5 py-2.5 flex items-center justify-between text-xs font-medium text-slate-600 hover:bg-slate-50 transition active:bg-slate-100"
+          >
+            <div class="flex items-center gap-1.5">
+              <i data-lucide="tag" class="w-3.5 h-3.5 text-emerald-600"></i>
+              <span>タグで絞り込む</span>
+              <span v-if="selectedTag" class="ml-1 px-2 py-0.5 bg-emerald-100 text-emerald-700 font-semibold rounded-md text-[11px]" v-text="'#' + selectedTag"></span>
+            </div>
+            <i :data-lucide="isTagAccordionOpen ? 'chevron-up' : 'chevron-down'" class="w-4 h-4 text-slate-400 transition-transform"></i>
+          </button>
+
+          <!-- アコーディオン本体：開くと全てのタグタブを表示 -->
+          <div v-show="isTagAccordionOpen" class="p-3 border-t border-slate-100 bg-slate-50/50">
+            <div class="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto no-scrollbar">
+              <button 
+                type="button"
+                @click="selectedTag = ''" 
+                :class="selectedTag === '' ? 'bg-emerald-600 text-white font-semibold shadow-xs' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'"
+                class="px-3 py-1.5 rounded-lg text-xs whitespace-nowrap transition min-h-[36px]"
+              >
+                すべて表示
+              </button>
+              <button 
+                type="button"
+                v-for="tag in allExistingTags" 
+                :key="tag" 
+                @click="toggleTagFilter(tag)" 
+                :class="selectedTag === tag ? 'bg-emerald-600 text-white font-semibold shadow-xs' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'"
+                class="px-3 py-1.5 rounded-lg text-xs whitespace-nowrap transition min-h-[36px] flex items-center gap-1"
+              >
+                <span v-text="'#' + tag"></span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ローディングスピナー -->
+      <section v-if="isLoading" class="text-center py-20">
+        <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div>
+        <p class="text-xs text-slate-500 mt-2">クラウドデータを同期中...</p>
+      </section>
+
+      <!-- Instagram風 画像タイル一覧グリッド表示 (スマホ3列・PC4〜5列) -->
+      <section v-else-if="filteredPrints.length > 0" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-0.5 sm:gap-2 sm:px-4">
+        <div 
+          v-for="item in filteredPrints" 
+          :key="item.id" 
+          @click="viewDetail(item)"
+          class="relative aspect-square bg-slate-200 overflow-hidden cursor-pointer group select-none sm:rounded-xl"
+        >
+          <img 
+            :src="item.image_url" 
+            :alt="item.title" 
+            class="w-full h-full object-cover group-hover:scale-105 active:scale-95 transition duration-200"
+            loading="lazy"
+          >
+          <!-- PCホバー時・タッチ時の微かなオーバーレイ -->
+          <div class="absolute inset-0 bg-black/0 group-hover:bg-black/20 active:bg-black/30 transition-colors"></div>
+        </div>
+      </section>
+
+      <!-- 空状態プレースホルダー -->
+      <section v-else class="mx-4 text-center py-16 px-4 bg-white rounded-2xl border border-dashed border-slate-300">
+        <div class="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-slate-400 mb-3">
+          <i data-lucide="image-off" class="w-6 h-6"></i>
+        </div>
+        <p class="text-sm font-medium text-slate-600">登録されたプリント情報がありません</p>
+        <p class="text-xs text-slate-400 mt-1">「登録する」ボタンから画像とネットプリント番号を追加してください</p>
+        <button @click="openModal()" class="mt-4 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 transition">
+          <i data-lucide="plus" class="w-3.5 h-3.5"></i> 新規登録
+        </button>
+      </section>
+    </main>
+
+    <!-- 画像タップ時の詳細・ネットプリント番号モーダル -->
+    <div 
+      v-if="selectedPreview" 
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-3 sm:p-4 animate-fade-in"
+      @click.self="selectedPreview = null"
+    >
+      <div class="relative max-w-lg w-full max-h-[90vh] bg-white rounded-2xl overflow-hidden shadow-2xl flex flex-col">
+        
+        <!-- 詳細モーダルヘッダー（タイトル・編集・削除・閉じる） -->
+        <div class="px-4 py-3 bg-white border-b border-slate-100 flex items-center justify-between gap-2 shrink-0">
+          <h3 class="font-bold text-slate-800 text-sm sm:text-base truncate" v-text="selectedPreview.title"></h3>
+          <div class="flex items-center space-x-1 shrink-0">
+            <button 
+              @click="openEditFromDetail(selectedPreview)" 
+              class="min-h-[40px] min-w-[40px] flex items-center justify-center text-slate-500 hover:text-emerald-600 hover:bg-slate-100 rounded-xl transition" 
+              title="編集"
+            >
+              <i data-lucide="edit-3" class="w-4 h-4"></i>
+            </button>
+            <button 
+              @click="deleteFromDetail(selectedPreview.id, selectedPreview.image_url)" 
+              class="min-h-[40px] min-w-[40px] flex items-center justify-center text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition" 
+              title="削除"
+            >
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+            </button>
+            <div class="w-px h-5 bg-slate-200 mx-0.5"></div>
+            <button 
+              @click="selectedPreview = null" 
+              class="min-h-[40px] min-w-[40px] flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition" 
+              title="閉じる"
+            >
+              <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- スクロール可能なコンテンツ領域 -->
+        <div class="overflow-y-auto flex-1 flex flex-col">
+          <!-- フル画像プレビュー -->
+          <div class="bg-slate-950 flex items-center justify-center min-h-[220px] max-h-[50vh] p-2 relative">
+            <img 
+              :src="selectedPreview.image_url" 
+              :alt="selectedPreview.title" 
+              class="max-h-[48vh] max-w-full object-contain rounded"
+            >
+          </div>
+
+          <!-- ネットプリント予約番号 & メタ詳細 -->
+          <div class="p-4 sm:p-5 space-y-4 bg-white">
+            
+            <!-- 予約番号ボックス (ワンタップコピー機能付き) -->
+            <div class="bg-emerald-50/70 border border-emerald-200/80 rounded-2xl p-3.5 flex items-center justify-between">
+              <div>
+                <span class="text-[10px] uppercase font-bold tracking-wider text-emerald-700 block mb-0.5">プリント予約番号 (8桁)</span>
+                <span class="font-mono text-2xl sm:text-3xl font-extrabold tracking-widest text-emerald-800 select-all" v-text="selectedPreview.print_number"></span>
+              </div>
+              <button 
+                @click="copyPrintNumber(selectedPreview.print_number)"
+                class="min-h-[44px] px-3.5 py-2 bg-white hover:bg-emerald-600 text-emerald-700 hover:text-white border border-emerald-200 rounded-xl text-xs font-semibold shadow-2xs transition active:scale-95 flex items-center gap-1.5"
+              >
+                <i data-lucide="copy" class="w-4 h-4"></i>
+                <span>コピー</span>
+              </button>
+            </div>
+
+            <!-- 印刷期限 -->
+            <div v-if="selectedPreview.expire_date" class="flex items-center gap-2 text-xs text-slate-600 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200/60">
+              <i data-lucide="calendar" class="w-4 h-4 text-emerald-600 shrink-0"></i>
+              <span class="font-medium">印刷期限:</span>
+              <span class="font-mono font-semibold text-slate-800" v-text="selectedPreview.expire_date"></span>
+            </div>
+
+            <!-- 説明 / 印刷設定メモ -->
+            <div v-if="selectedPreview.description" class="space-y-1">
+              <span class="text-[11px] font-semibold text-slate-400 block">説明・メモ</span>
+              <p class="text-xs sm:text-sm text-slate-700 whitespace-pre-wrap bg-slate-50 p-3 rounded-xl border border-slate-100 leading-relaxed select-text" v-text="selectedPreview.description"></p>
+            </div>
+
+            <!-- タグ一覧（タップでそのタグで絞り込み） -->
+            <div v-if="selectedPreview.tags && selectedPreview.tags.length > 0" class="space-y-1.5 pt-1">
+              <span class="text-[11px] font-semibold text-slate-400 block">タグ</span>
+              <div class="flex flex-wrap gap-1.5">
+                <button 
+                  v-for="t in selectedPreview.tags" 
+                  :key="t" 
+                  @click="filterByTagFromModal(t)"
+                  class="text-xs bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 px-2.5 py-1 rounded-lg font-medium transition"
+                  v-text="'#' + t"
+                ></button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 登録・編集モーダル -->
+    <div 
+      v-if="isModalOpen" 
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 overflow-y-auto animate-fade-in"
+      @click.self="closeModal()"
+      @paste="handlePaste"
+    >
+      <div class="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-lg w-full overflow-hidden flex flex-col my-auto">
+        <!-- モーダルヘッダー -->
+        <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+          <h3 class="font-semibold text-slate-800 text-base" v-text="isEditing ? 'プリント情報の編集' : '新規プリント登録'"></h3>
+          <button @click="closeModal()" class="min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-400 hover:text-slate-600 rounded-lg">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <!-- フォーム本体 -->
+        <form @submit.prevent="savePrint" class="p-6 space-y-4">
+          <!-- 画像選択/貼り付けボタンエリア -->
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <label class="block text-xs font-medium text-slate-700">
+                プリント対象の画像 <span class="text-rose-500">*</span>
+              </label>
+              <button 
+                type="button" 
+                @click="pasteFromClipboard" 
+                class="min-h-[36px] px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 rounded-lg flex items-center gap-1.5 transition active:scale-95"
+              >
+                <i data-lucide="clipboard" class="w-3.5 h-3.5"></i>
+                <span>スクショを貼り付け</span>
+              </button>
+            </div>
+
+            <div 
+              @click="$refs.fileInput.click()" 
+              class="border-2 border-dashed border-slate-200 hover:border-emerald-400 rounded-xl p-4 text-center cursor-pointer bg-slate-50/50 hover:bg-emerald-50/20 transition flex flex-col items-center justify-center min-h-[140px]"
+            >
+              <input 
+                type="file" 
+                ref="fileInput" 
+                @change="handleFileUpload" 
+                accept="image/*" 
+                class="hidden"
+              >
+              <template v-if="previewImage">
+                <img :src="previewImage" class="max-h-36 object-contain rounded-lg shadow-2xs mb-2">
+                <span class="text-xs text-emerald-600 font-medium">タップして画像を変更（または右上の貼り付けボタン）</span>
+              </template>
+              <template v-else>
+                <i data-lucide="image-plus" class="w-8 h-8 text-slate-400 mb-2"></i>
+                <span class="text-xs text-slate-700 font-medium">タップして選択、または上の「スクショを貼り付け」ボタン</span>
+                <span class="text-[11px] text-slate-400 mt-0.5">ショートカットキー（⌘V / Ctrl+V）でも直接貼付可能</span>
+              </template>
+            </div>
+          </div>
+
+          <!-- タイトル -->
+          <div>
+            <label class="block text-xs font-medium text-slate-700 mb-1">タイトル <span class="text-rose-500">*</span></label>
+            <input 
+              v-model="formData.title" 
+              type="text" 
+              required
+              placeholder="例: イラストL判 / チラシ" 
+              class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+            >
+          </div>
+
+          <!-- ネットプリント予約番号（8桁半角数字限定） -->
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-xs font-medium text-slate-700">
+                プリント予約番号 (半角数字8桁) <span class="text-rose-500">*</span>
+              </label>
+              <span class="text-[11px] font-mono" :class="formData.print_number.length === 8 ? 'text-emerald-600 font-semibold' : 'text-slate-400'">
+                <span v-text="formData.print_number.length"></span> / 8桁
+              </span>
+            </div>
+            <input 
+              :value="formData.print_number" 
+              @input="handlePrintNumberInput"
+              type="text" 
+              inputmode="numeric"
+              pattern="[0-9]{8}"
+              maxlength="8"
+              required
+              placeholder="例: 12345678" 
+              class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-base tracking-widest focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+            >
+          </div>
+
+          <!-- タグ登録 -->
+          <div>
+            <label class="block text-xs font-medium text-slate-700 mb-1">タグ (スペースまたはカンマ区切りで複数登録可)</label>
+            <input 
+              v-model="formData.tagsInput" 
+              type="text" 
+              placeholder="例: イラスト 写真 A4 チラシ" 
+              class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+            >
+          </div>
+
+          <!-- 有効期限 -->
+          <div>
+            <label class="block text-xs font-medium text-slate-700 mb-1">印刷期限 (任意)</label>
+            <input 
+              v-model="formData.expire_date" 
+              type="date" 
+              class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+            >
+          </div>
+
+          <!-- 説明・備考 (Shift+Enter送信ガイド付) -->
+          <div>
+            <label class="block text-xs font-medium text-slate-700 mb-1">説明 / 印刷設定メモ (用紙サイズ・カラー等)</label>
+            <textarea 
+              v-model="formData.description" 
+              rows="3" 
+              @keydown="handleTextareaKeydown"
+              placeholder="例: 写真用紙 / カラー / 40円 (Shift + Enter で送信)" 
+              class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 resize-none"
+            ></textarea>
+            <span class="text-[10px] text-slate-400 block mt-0.5 text-right">送信: Shift + Enter</span>
+          </div>
+
+          <!-- アクションボタン -->
+          <div class="pt-3 flex items-center justify-end space-x-2">
+            <button 
+              type="button" 
+              @click="closeModal()" 
+              :disabled="isSubmitting"
+              class="min-h-[44px] px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl text-sm font-medium transition disabled:opacity-50"
+            >
+              キャンセル
+            </button>
+            <button 
+              type="submit" 
+              :disabled="isSubmitting"
+              class="min-h-[44px] px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-xl shadow-sm transition active:scale-95 disabled:opacity-50 flex items-center gap-1.5"
+            >
+              <div v-if="isSubmitting" class="animate-spin rounded-full h-3.5 w-3.5 border-2 border-white border-t-transparent"></div>
+              <span v-text="isSubmitting ? '保存中...' : (isEditing ? '更新する' : '保存する')"></span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- トースト通知 -->
+    <div 
+      v-if="toastMessage" 
+      class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-900/90 backdrop-blur text-white px-4 py-2.5 rounded-full text-xs font-medium shadow-lg flex items-center space-x-2 animate-bounce-short"
+    >
+      <i data-lucide="check-circle" class="w-4 h-4 text-emerald-400"></i>
+      <span v-text="toastMessage"></span>
+    </div>
+
+  </div>
+
+  <script>
+    /**
+     * Supabase クライアント初期化 (変更なし)
+     */
+    const SUPABASE_URL = 'https://vlkzrlelwferqbfzgbwm.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_VZZGz6LZvrWBIkAyjA8wOA_b3Jj0lOl';
+    const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+
+    /**
+     * IndexedDB キャッシュ用ラッパー (変更なし)
+     */
+    const DB_NAME = 'NetPrintHubDB';
+    const DB_VERSION = 2;
+    const STORE_NAME = 'prints';
+
+    function initDB() {
+      return new Promise((resolve, reject) => {
+        try {
+          const req = indexedDB.open(DB_NAME, DB_VERSION);
+          req.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains(STORE_NAME)) {
+              const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+              store.createIndex('created_at', 'created_at', { unique: false });
+            }
+          };
+          req.onsuccess = (e) => resolve(e.target.result);
+          req.onerror = (e) => reject('IndexedDB接続エラー: ' + e.target.error);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }
+
+    const { createApp, ref, computed, onMounted, nextTick } = Vue;
+
+    createApp({
+      setup() {
+        const db = ref(null);
+        const prints = ref([]);
+        const searchQuery = ref('');
+        const selectedTag = ref('');
+        const isTagAccordionOpen = ref(false);
+        const isModalOpen = ref(false);
+        const isEditing = ref(false);
+        const isLoading = ref(true);
+        const isSubmitting = ref(false);
+        const selectedPreview = ref(null);
+        const toastMessage = ref('');
+        
+        const previewImage = ref('');
+        const pendingImageFile = ref(null);
+        const formData = ref({
+          id: null,
+          title: '',
+          print_number: '',
+          tagsInput: '',
+          image_url: '',
+          expire_date: '',
+          description: '',
+          created_at: null
+        });
+
+        const renderIcons = () => {
+          nextTick(() => {
+            if (window.lucide && typeof window.lucide.createIcons === 'function') {
+              window.lucide.createIcons();
+            }
+          });
+        };
+
+        const showToast = (msg) => {
+          toastMessage.value = msg;
+          renderIcons();
+          setTimeout(() => {
+            toastMessage.value = '';
+          }, 3000);
+        };
+
+        const syncToIndexedDB = async (items) => {
+          if (!db.value) return;
+          try {
+            const tx = db.value.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            items.forEach(item => store.put(item));
+          } catch (e) {
+            console.error('IndexedDB 同期警告:', e);
+          }
+        };
+
+        const loadPrints = async () => {
+          // IndexedDBキャッシュ先行読み込み
+          if (db.value) {
+            try {
+              const tx = db.value.transaction(STORE_NAME, 'readonly');
+              const store = tx.objectStore(STORE_NAME);
+              const req = store.getAll();
+              req.onsuccess = () => {
+                if (req.result && req.result.length > 0) {
+                  prints.value = req.result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                  isLoading.value = false;
+                  renderIcons();
+                }
+              };
+            } catch (err) {
+              console.warn('キャッシュ読み込み:', err);
+            }
+          }
+
+          // Supabaseから最新取得
+          if (supabaseClient) {
+            try {
+              const { data, error } = await supabaseClient
+                .from('prints')
+                .select('*')
+                .order('created_at', { ascending: false });
+
+              if (error) throw error;
+
+              if (data) {
+                prints.value = data;
+                syncToIndexedDB(data);
+              }
+            } catch (err) {
+              console.error(err);
+              if (prints.value.length === 0) {
+                alert('クラウドデータの取得に失敗しました。ローカルキャッシュを表示します。\n理由: ' + (err.message || err));
+              }
+            }
+          }
+          isLoading.value = false;
+          renderIcons();
+        };
+
+        // Supabase Realtime リスナー
+        const setupRealtime = () => {
+          if (!supabaseClient) return;
+
+          supabaseClient
+            .channel('public:prints')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'prints' }, (payload) => {
+              if (payload.eventType === 'INSERT') {
+                if (!prints.value.some(p => p.id === payload.new.id)) {
+                  prints.value.unshift(payload.new);
+                  showToast('新しいプリント情報が追加されました');
+                }
+              } else if (payload.eventType === 'UPDATE') {
+                const index = prints.value.findIndex(p => p.id === payload.new.id);
+                if (index !== -1) {
+                  prints.value[index] = payload.new;
+                }
+                if (selectedPreview.value && selectedPreview.value.id === payload.new.id) {
+                  selectedPreview.value = payload.new;
+                }
+              } else if (payload.eventType === 'DELETE') {
+                prints.value = prints.value.filter(p => p.id === payload.old.id);
+                if (selectedPreview.value && selectedPreview.value.id === payload.old.id) {
+                  selectedPreview.value = null;
+                }
+              }
+              renderIcons();
+            })
+            .subscribe();
+        };
+
+        const processImageFile = (file) => {
+          if (!file) return;
+          if (!file.type || !file.type.startsWith('image/')) {
+            alert('画像ファイルを選択またはペーストしてください。');
+            return;
+          }
+          pendingImageFile.value = file;
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            previewImage.value = event.target.result;
+            renderIcons();
+          };
+          reader.onerror = () => {
+            alert('画像の読み込みに失敗しました。');
+          };
+          reader.readAsDataURL(file);
+        };
+
+        const handleFileUpload = (e) => {
+          const file = e.target.files[0];
+          processImageFile(file);
+        };
+
+        const handlePaste = (e) => {
+          const items = (e.clipboardData || e.originalEvent?.clipboardData)?.items;
+          if (!items) return;
+          for (const item of items) {
+            if (item.type && item.type.indexOf('image') !== -1) {
+              const file = item.getAsFile();
+              if (file) {
+                processImageFile(file);
+                showToast('スクショ画像を貼り付けました');
+                break;
+              }
+            }
+          }
+        };
+
+        const pasteFromClipboard = async () => {
+          if (!navigator.clipboard || !navigator.clipboard.read) {
+            alert('お使いのブラウザはボタン操作によるクリップボード読み取りに対応していません。キーボードの ⌘V または Ctrl+V をご利用ください。');
+            return;
+          }
+
+          try {
+            const clipboardItems = await navigator.clipboard.read();
+            let foundImage = false;
+
+            for (const item of clipboardItems) {
+              const imageType = item.types.find(type => type.startsWith('image/'));
+              if (imageType) {
+                const blob = await item.getType(imageType);
+                processImageFile(blob);
+                foundImage = true;
+                showToast('クリップボードから画像を貼り付けました');
+                break;
+              }
+            }
+
+            if (!foundImage) {
+              alert('クリップボードに画像が見つかりませんでした。スクリーンショットをコピーした状態でもう一度お試しください。');
+            }
+          } catch (err) {
+            alert('クリップボードの読み取りに失敗しました。ブラウザのアクセス権限を確認するか、ショートカットキー（⌘V / Ctrl+V）をご利用ください。\n理由: ' + err);
+          }
+        };
+
+        const handlePrintNumberInput = (e) => {
+          let val = e.target.value
+            .replace(/[０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+            .replace(/\D/g, '')
+            .slice(0, 8);
+          formData.value.print_number = val;
+          e.target.value = val;
+        };
+
+        const openModal = () => {
+          isEditing.value = false;
+          previewImage.value = '';
+          pendingImageFile.value = null;
+          formData.value = {
+            id: null,
+            title: '',
+            print_number: '',
+            tagsInput: '',
+            image_url: '',
+            expire_date: '',
+            description: '',
+            created_at: null
+          };
+          isModalOpen.value = true;
+          renderIcons();
+        };
+
+        const closeModal = () => {
+          if (isSubmitting.value) return;
+          isModalOpen.value = false;
+        };
+
+        const editPrint = (item) => {
+          isEditing.value = true;
+          previewImage.value = item.image_url;
+          pendingImageFile.value = null;
+          formData.value = {
+            ...item,
+            tagsInput: item.tags ? item.tags.join(' ') : ''
+          };
+          isModalOpen.value = true;
+          renderIcons();
+        };
+
+        // 詳細モーダルから編集を開く
+        const openEditFromDetail = (item) => {
+          selectedPreview.value = null;
+          editPrint(item);
+        };
+
+        // 詳細モーダルから削除を実行
+        const deleteFromDetail = async (id, imageUrl) => {
+          await confirmDelete(id, imageUrl);
+          selectedPreview.value = null;
+        };
+
+        // 予約番号のワンタップコピー
+        const copyPrintNumber = async (num) => {
+          if (!num) return;
+          try {
+            await navigator.clipboard.writeText(num);
+            showToast(`予約番号 (${num}) をコピーしました`);
+          } catch (e) {
+            showToast('コピーに失敗しました');
+          }
+        };
+
+        // 詳細モーダル内のタグをタップした際に絞り込む
+        const filterByTagFromModal = (tag) => {
+          selectedTag.value = tag;
+          selectedPreview.value = null;
+        };
+
+        const uploadImageToSupabase = async (file) => {
+          const ext = file.type?.split('/')[1] || 'png';
+          const filePath = `prints/${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
+          
+          const { data, error } = await supabaseClient.storage
+            .from('print-images')
+            .upload(filePath, file, { contentType: file.type || 'image/png' });
+
+          if (error) throw error;
+
+          const { data: publicUrlData } = supabaseClient.storage
+            .from('print-images')
+            .getPublicUrl(filePath);
+
+          return publicUrlData.publicUrl;
+        };
+
+        const savePrint = async () => {
+          if (!previewImage.value) {
+            alert('プリント対象の画像を選択またはペーストしてください。');
+            return;
+          }
+          if (!formData.value.title.trim()) {
+            alert('タイトルを入力してください。');
+            return;
+          }
+          const numberPattern = /^[0-9]{8}$/;
+          if (!numberPattern.test(formData.value.print_number)) {
+            alert('予約番号は半角数字8桁で入力してください。');
+            return;
+          }
+
+          const tags = Array.from(new Set(
+            (formData.value.tagsInput || '')
+              .replace(/#/g, '')
+              .split(/[\s,、]+/)
+              .map(t => t.trim())
+              .filter(t => t.length > 0)
+          ));
+
+          isSubmitting.value = true;
+
+          try {
+            let finalImageUrl = formData.value.image_url;
+
+            if (pendingImageFile.value) {
+              finalImageUrl = await uploadImageToSupabase(pendingImageFile.value);
+            }
+
+            const payload = {
+              title: formData.value.title.trim(),
+              print_number: formData.value.print_number,
+              tags: tags,
+              image_url: finalImageUrl,
+              expire_date: formData.value.expire_date || null,
+              description: formData.value.description ? formData.value.description.trim() : ''
+            };
+
+            let savedData = null;
+
+            if (isEditing.value) {
+              const { data, error } = await supabaseClient
+                .from('prints')
+                .update(payload)
+                .eq('id', formData.value.id)
+                .select();
+
+              if (error) throw error;
+              savedData = data[0];
+            } else {
+              const { data, error } = await supabaseClient
+                .from('prints')
+                .insert([payload])
+                .select();
+
+              if (error) throw error;
+              savedData = data[0];
+            }
+
+            if (db.value && savedData) {
+              const tx = db.value.transaction(STORE_NAME, 'readwrite');
+              tx.objectStore(STORE_NAME).put(savedData);
+            }
+
+            closeModal();
+            await loadPrints();
+            showToast(isEditing.value ? 'プリント情報を更新しました' : '新規プリントを登録しました');
+          } catch (err) {
+            alert('保存に失敗しました: ' + (err.message || err));
+          } finally {
+            isSubmitting.value = false;
+          }
+        };
+
+        const confirmDelete = async (id, imageUrl) => {
+          if (!confirm('このプリント情報を削除してもよろしいですか？')) return;
+          try {
+            const { error } = await supabaseClient
+              .from('prints')
+              .delete()
+              .eq('id', id);
+
+            if (error) throw error;
+
+            try {
+              if (imageUrl && imageUrl.includes('/print-images/')) {
+                const parts = imageUrl.split('/print-images/');
+                if (parts[1]) {
+                  await supabaseClient.storage.from('print-images').remove([decodeURIComponent(parts[1])]);
+                }
+              }
+            } catch (storageErr) {
+              console.warn('ストレージ画像削除スキップ:', storageErr);
+            }
+
+            if (db.value) {
+              const tx = db.value.transaction(STORE_NAME, 'readwrite');
+              tx.objectStore(STORE_NAME).delete(id);
+            }
+
+            await loadPrints();
+            showToast('削除しました');
+          } catch (err) {
+            alert('通信エラーによる削除失敗: ' + (err.message || err));
+          }
+        };
+
+        const handleTextareaKeydown = (e) => {
+          if (e.key === 'Enter' && e.shiftKey) {
+            e.preventDefault();
+            savePrint();
+          }
+        };
+
+        const viewDetail = (item) => {
+          selectedPreview.value = item;
+          renderIcons();
+        };
+
+        const formatDate = (dateStr) => {
+          if (!dateStr) return '';
+          const parts = dateStr.split('-');
+          if (parts.length === 3) return `${parts[1]}/${parts[2]}`;
+          return dateStr;
+        };
+
+        const allExistingTags = computed(() => {
+          const set = new Set();
+          prints.value.forEach(p => {
+            if (Array.isArray(p.tags)) {
+              p.tags.forEach(t => set.add(t));
+            }
+          });
+          return Array.from(set);
+        });
+
+        const toggleTagAccordion = () => {
+          isTagAccordionOpen.value = !isTagAccordionOpen.value;
+          renderIcons();
+        };
+
+        const toggleTagFilter = (tag) => {
+          selectedTag.value = (selectedTag.value === tag) ? '' : tag;
+        };
+
+        const filteredPrints = computed(() => {
+          const q = searchQuery.value.trim().toLowerCase();
+          const targetTag = selectedTag.value;
+
+          return prints.value.filter(p => {
+            if (targetTag && (!p.tags || !p.tags.includes(targetTag))) {
+              return false;
+            }
+
+            if (q) {
+              const matchTitle = (p.title || '').toLowerCase().includes(q);
+              const matchNumber = (p.print_number || '').includes(q);
+              const matchDesc = (p.description || '').toLowerCase().includes(q);
+              const matchTag = p.tags && p.tags.some(t => t.toLowerCase().includes(q));
+              return matchTitle || matchNumber || matchDesc || matchTag;
+            }
+
+            return true;
+          });
+        });
+
+        onMounted(async () => {
+          try {
+            db.value = await initDB();
+          } catch (err) {
+            console.warn('IndexedDB非対応環境:', err);
+          }
+          await loadPrints();
+          setupRealtime();
+        });
+
+        return {
+          prints,
+          searchQuery,
+          selectedTag,
+          isTagAccordionOpen,
+          allExistingTags,
+          filteredPrints,
+          isModalOpen,
+          isEditing,
+          isLoading,
+          isSubmitting,
+          formData,
+          previewImage,
+          selectedPreview,
+          toastMessage,
+          openModal,
+          closeModal,
+          editPrint,
+          openEditFromDetail,
+          deleteFromDetail,
+          copyPrintNumber,
+          filterByTagFromModal,
+          savePrint,
+          confirmDelete,
+          handleFileUpload,
+          handlePaste,
+          pasteFromClipboard,
+          handlePrintNumberInput,
+          handleTextareaKeydown,
+          viewDetail,
+          formatDate,
+          toggleTagAccordion,
+          toggleTagFilter
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>
