@@ -31,7 +31,7 @@
       padding-left: env(safe-area-inset-left);
       padding-right: env(safe-area-inset-right);
     }
-    input, textarea {
+    input, textarea, select {
       user-select: text;
     }
     .no-scrollbar::-webkit-scrollbar {
@@ -46,85 +46,140 @@
 <body class="bg-slate-50 text-slate-900 min-h-screen antialiased flex flex-col">
   <div id="app" v-cloak class="flex-1 flex flex-col min-h-screen">
     
-    <!-- ナビゲーションバー (Dynamic Island・ノッチ干渉防止 & ミニマルデザイン) -->
-    <header class="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-200/80 px-4 sm:px-6 lg:px-8 pb-3 flex items-center justify-between transition-all"
-            style="padding-top: calc(env(safe-area-inset-top, 0px) + 0.6rem);">
-      <div class="flex items-center space-x-2">
-        <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-white shadow-sm active:scale-95 transition">
-          <i data-lucide="printer" class="w-5 h-5"></i>
+    <!-- ナビゲーションバー (Dynamic Island回避・文字折り返し防止・省スペース設計) -->
+    <header class="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200/80 px-3 sm:px-6 lg:px-8 pb-2.5 flex items-center justify-between gap-2 transition-all"
+            style="padding-top: max(env(safe-area-inset-top, 0px) + 0.5rem, 2.75rem);">
+      <!-- 左側：アプリアイコン -->
+      <div class="flex items-center gap-1.5 shrink-0">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-white shadow-xs">
+          <i data-lucide="printer" class="w-4 h-4"></i>
         </div>
-        <span class="text-[10px] text-slate-300 font-mono tracking-tighter select-none">v1.5.0</span>
+        <span class="hidden sm:inline text-[10px] text-slate-300 font-mono tracking-tighter select-none">v1.7.0</span>
       </div>
 
-      <div class="flex items-center space-x-2">
-        <button @click="openModal()" 
-                class="min-h-[44px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-medium text-sm rounded-xl shadow-sm transition flex items-center gap-1.5">
-          <i data-lucide="plus-circle" class="w-4 h-4"></i>
-          <span>登録する</span>
+      <!-- 中央：グリッド列数切り替え (1列 / 2列 / 3列 - 折り返し完全防止) -->
+      <div class="bg-slate-100 p-1 rounded-xl flex items-center border border-slate-200/70 shrink-0">
+        <button 
+          type="button"
+          v-for="col in [1, 2, 3]" 
+          :key="col"
+          @click="setGridCols(col)"
+          :class="gridCols === col ? 'bg-white text-emerald-700 shadow-2xs font-bold' : 'text-slate-500 hover:text-slate-700 font-medium'"
+          class="h-8 px-3 rounded-lg text-xs whitespace-nowrap transition flex items-center justify-center gap-1 active:scale-95"
+        >
+          <i :data-lucide="col === 1 ? 'square' : (col === 2 ? 'columns-2' : 'grid-3x3')" class="w-3.5 h-3.5 shrink-0"></i>
+          <span v-text="col + '列'" class="whitespace-nowrap"></span>
         </button>
       </div>
+
+      <!-- 右側：登録ボタン -->
+      <button @click="openModal()" 
+              class="h-9 px-3.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-semibold text-xs rounded-xl shadow-xs whitespace-nowrap transition flex items-center gap-1 shrink-0">
+        <i data-lucide="plus" class="w-4 h-4 shrink-0"></i>
+        <span>登録する</span>
+      </button>
     </header>
 
     <!-- メインコンテンツ領域 -->
     <main class="flex-1 max-w-5xl w-full mx-auto pb-8">
       
-      <!-- 検索・タグエリア -->
-      <section class="p-3 sm:p-4 space-y-2.5">
-        <!-- 検索バー -->
-        <div class="relative w-full">
-          <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2"></i>
-          <input 
-            v-model="searchQuery" 
-            type="text" 
-            placeholder="タイトル、タグ、予約番号(8桁)で検索..." 
-            class="w-full pl-10 pr-9 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition shadow-sm"
-          >
+      <!-- 省スペース型フィルタエリア（タグ絞り込み & 登録月絞り込みを1行に集約） -->
+      <section v-if="sortedTagsWithCount.length > 0 || sortedMonthsWithCount.length > 0" class="px-3 sm:px-4 pt-2.5 pb-2 space-y-2">
+        <div class="grid grid-cols-2 gap-2">
+          <!-- タグで絞り込むトリガーボタン -->
           <button 
-            v-if="searchQuery" 
-            @click="searchQuery = ''" 
-            class="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600"
+            v-if="sortedTagsWithCount.length > 0"
+            type="button"
+            @click="toggleTagAccordion" 
+            :class="[
+              'px-3 py-2 rounded-xl border text-xs font-medium flex items-center justify-between gap-1.5 transition shadow-2xs',
+              selectedTag || isTagAccordionOpen ? 'bg-emerald-50/80 border-emerald-300 text-emerald-800' : 'bg-white border-slate-200/80 text-slate-600 hover:bg-slate-50',
+              sortedMonthsWithCount.length === 0 ? 'col-span-2' : ''
+            ]"
           >
-            <i data-lucide="x-circle" class="w-4 h-4"></i>
+            <div class="flex items-center gap-1.5 min-w-0">
+              <i data-lucide="tag" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i>
+              <span v-if="!selectedTag" class="truncate">タグで絞り込む</span>
+              <span v-else class="font-bold text-emerald-700 truncate" v-text="'#' + selectedTag"></span>
+            </div>
+            <i :data-lucide="isTagAccordionOpen ? 'chevron-up' : 'chevron-down'" class="w-4 h-4 text-slate-400 shrink-0"></i>
+          </button>
+
+          <!-- 登録月で絞り込むトリガーボタン -->
+          <button 
+            v-if="sortedMonthsWithCount.length > 0"
+            type="button"
+            @click="toggleMonthAccordion" 
+            :class="[
+              'px-3 py-2 rounded-xl border text-xs font-medium flex items-center justify-between gap-1.5 transition shadow-2xs',
+              selectedMonth || isMonthAccordionOpen ? 'bg-emerald-50/80 border-emerald-300 text-emerald-800' : 'bg-white border-slate-200/80 text-slate-600 hover:bg-slate-50',
+              sortedTagsWithCount.length === 0 ? 'col-span-2' : ''
+            ]"
+          >
+            <div class="flex items-center gap-1.5 min-w-0">
+              <i data-lucide="calendar-days" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i>
+              <span v-if="!selectedMonth" class="truncate">登録月で絞り込む</span>
+              <span v-else class="font-bold text-emerald-700 truncate" v-text="formatMonthLabel(selectedMonth)"></span>
+            </div>
+            <i :data-lucide="isMonthAccordionOpen ? 'chevron-up' : 'chevron-down'" class="w-4 h-4 text-slate-400 shrink-0"></i>
           </button>
         </div>
 
-        <!-- タグ検索アコーディオン（初期は閉じた状態） -->
-        <div v-if="allExistingTags.length > 0" class="bg-white border border-slate-200/80 rounded-xl shadow-2xs overflow-hidden transition-all">
-          <button 
-            type="button"
-            @click="toggleTagAccordion" 
-            class="w-full px-3.5 py-2.5 flex items-center justify-between text-xs font-medium text-slate-600 hover:bg-slate-50 transition active:bg-slate-100"
-          >
-            <div class="flex items-center gap-1.5">
-              <i data-lucide="tag" class="w-3.5 h-3.5 text-emerald-600"></i>
-              <span>タグで絞り込む</span>
-              <span v-if="selectedTag" class="ml-1 px-2 py-0.5 bg-emerald-100 text-emerald-700 font-semibold rounded-md text-[11px]" v-text="'#' + selectedTag"></span>
-            </div>
-            <i :data-lucide="isTagAccordionOpen ? 'chevron-up' : 'chevron-down'" class="w-4 h-4 text-slate-400 transition-transform"></i>
-          </button>
+        <!-- タグ展開パネル（利用頻度・件数順） -->
+        <div v-show="isTagAccordionOpen" class="p-2.5 bg-white border border-slate-200/80 rounded-xl shadow-xs">
+          <div class="flex flex-wrap gap-1.5 max-h-44 overflow-y-auto no-scrollbar">
+            <button 
+              type="button"
+              @click="selectedTag = ''" 
+              :class="selectedTag === '' ? 'bg-emerald-600 text-white font-semibold shadow-2xs' : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'"
+              class="px-3 py-1.5 rounded-lg text-xs whitespace-nowrap transition min-h-[34px]"
+            >
+              すべて表示
+            </button>
+            <button 
+              type="button"
+              v-for="item in sortedTagsWithCount" 
+              :key="item.name" 
+              @click="toggleTagFilter(item.name)" 
+              :class="selectedTag === item.name ? 'bg-emerald-600 text-white font-semibold shadow-2xs' : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'"
+              class="px-3 py-1.5 rounded-lg text-xs whitespace-nowrap transition min-h-[34px] flex items-center gap-1.5"
+            >
+              <span v-text="'#' + item.name"></span>
+              <span 
+                :class="selectedTag === item.name ? 'bg-emerald-700 text-emerald-50' : 'bg-slate-200/70 text-slate-600'"
+                class="px-1.5 py-0.2 rounded-full text-[10px] font-mono"
+                v-text="item.count"
+              ></span>
+            </button>
+          </div>
+        </div>
 
-          <!-- アコーディオン本体：開くと全てのタグタブを表示 -->
-          <div v-show="isTagAccordionOpen" class="p-3 border-t border-slate-100 bg-slate-50/50">
-            <div class="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto no-scrollbar">
-              <button 
-                type="button"
-                @click="selectedTag = ''" 
-                :class="selectedTag === '' ? 'bg-emerald-600 text-white font-semibold shadow-xs' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'"
-                class="px-3 py-1.5 rounded-lg text-xs whitespace-nowrap transition min-h-[36px]"
-              >
-                すべて表示
-              </button>
-              <button 
-                type="button"
-                v-for="tag in allExistingTags" 
-                :key="tag" 
-                @click="toggleTagFilter(tag)" 
-                :class="selectedTag === tag ? 'bg-emerald-600 text-white font-semibold shadow-xs' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'"
-                class="px-3 py-1.5 rounded-lg text-xs whitespace-nowrap transition min-h-[36px] flex items-center gap-1"
-              >
-                <span v-text="'#' + tag"></span>
-              </button>
-            </div>
+        <!-- 登録月展開パネル（created_atから自動算出） -->
+        <div v-show="isMonthAccordionOpen" class="p-2.5 bg-white border border-slate-200/80 rounded-xl shadow-xs">
+          <div class="flex flex-wrap gap-1.5 max-h-44 overflow-y-auto no-scrollbar">
+            <button 
+              type="button"
+              @click="selectedMonth = ''" 
+              :class="selectedMonth === '' ? 'bg-emerald-600 text-white font-semibold shadow-2xs' : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'"
+              class="px-3 py-1.5 rounded-lg text-xs whitespace-nowrap transition min-h-[34px]"
+            >
+              全期間
+            </button>
+            <button 
+              type="button"
+              v-for="m in sortedMonthsWithCount" 
+              :key="m.key" 
+              @click="toggleMonthFilter(m.key)" 
+              :class="selectedMonth === m.key ? 'bg-emerald-600 text-white font-semibold shadow-2xs' : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'"
+              class="px-3 py-1.5 rounded-lg text-xs whitespace-nowrap transition min-h-[34px] flex items-center gap-1.5"
+            >
+              <span v-text="m.label"></span>
+              <span 
+                :class="selectedMonth === m.key ? 'bg-emerald-700 text-emerald-50' : 'bg-slate-200/70 text-slate-600'"
+                class="px-1.5 py-0.2 rounded-full text-[10px] font-mono"
+                v-text="m.count"
+              ></span>
+            </button>
           </div>
         </div>
       </section>
@@ -135,35 +190,49 @@
         <p class="text-xs text-slate-500 mt-2">クラウドデータを同期中...</p>
       </section>
 
-      <!-- Instagram風 画像タイル一覧グリッド表示 (スマホ3列・PC4〜5列) -->
-      <section v-else-if="filteredPrints.length > 0" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-0.5 sm:gap-2 sm:px-4">
+      <!-- 画像タイル一覧グリッド表示 (ユーザー選択の1列/2列/3列を反映 & 全体表示) -->
+      <section 
+        v-else-if="filteredPrints.length > 0" 
+        :class="[
+          'grid px-3 sm:px-4 pt-1 transition-all',
+          gridCols === 1 ? 'grid-cols-1 gap-3.5' : (gridCols === 2 ? 'grid-cols-2 gap-2.5' : 'grid-cols-3 gap-1.5 sm:gap-2.5')
+        ]"
+      >
         <div 
           v-for="item in filteredPrints" 
           :key="item.id" 
           @click="viewDetail(item)"
-          class="relative aspect-square bg-slate-200 overflow-hidden cursor-pointer group select-none sm:rounded-xl"
+          :class="[
+            'relative bg-white border border-slate-200/80 rounded-xl overflow-hidden cursor-pointer group select-none shadow-2xs flex items-center justify-center',
+            gridCols === 1 ? 'p-2.5 aspect-[16/11]' : (gridCols === 2 ? 'p-1.5 aspect-[4/3]' : 'p-1 aspect-[4/3]')
+          ]"
         >
           <img 
             :src="item.image_url" 
             :alt="item.title" 
-            class="w-full h-full object-cover group-hover:scale-105 active:scale-95 transition duration-200"
+            class="w-full h-full object-contain group-hover:scale-[1.03] active:scale-95 transition duration-200"
             loading="lazy"
           >
-          <!-- PCホバー時・タッチ時の微かなオーバーレイ -->
-          <div class="absolute inset-0 bg-black/0 group-hover:bg-black/20 active:bg-black/30 transition-colors"></div>
+          <!-- ホバー・タッチ時のフィードバック -->
+          <div class="absolute inset-0 bg-black/0 group-hover:bg-black/5 active:bg-black/15 transition-colors pointer-events-none"></div>
         </div>
       </section>
 
       <!-- 空状態プレースホルダー -->
-      <section v-else class="mx-4 text-center py-16 px-4 bg-white rounded-2xl border border-dashed border-slate-300">
+      <section v-else class="mx-4 mt-3 text-center py-16 px-4 bg-white rounded-2xl border border-dashed border-slate-300">
         <div class="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-slate-400 mb-3">
           <i data-lucide="image-off" class="w-6 h-6"></i>
         </div>
-        <p class="text-sm font-medium text-slate-600">登録されたプリント情報がありません</p>
-        <p class="text-xs text-slate-400 mt-1">「登録する」ボタンから画像とネットプリント番号を追加してください</p>
-        <button @click="openModal()" class="mt-4 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 transition">
-          <i data-lucide="plus" class="w-3.5 h-3.5"></i> 新規登録
-        </button>
+        <p class="text-sm font-medium text-slate-600">有効なプリント情報がありません</p>
+        <p class="text-xs text-slate-400 mt-1">絞り込みを解除するか、「登録する」ボタンから追加してください</p>
+        <div class="mt-4 flex items-center justify-center gap-2">
+          <button v-if="selectedTag || selectedMonth" @click="selectedTag = ''; selectedMonth = ''" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition">
+            絞り込みを解除
+          </button>
+          <button @click="openModal()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 transition">
+            <i data-lucide="plus" class="w-3.5 h-3.5"></i> 新規登録
+          </button>
+        </div>
       </section>
     </main>
 
@@ -175,9 +244,9 @@
     >
       <div class="relative max-w-lg w-full max-h-[90vh] bg-white rounded-2xl overflow-hidden shadow-2xl flex flex-col">
         
-        <!-- 詳細モーダルヘッダー（タイトル・編集・削除・閉じる） -->
-        <div class="px-4 py-3 bg-white border-b border-slate-100 flex items-center justify-between gap-2 shrink-0">
-          <h3 class="font-bold text-slate-800 text-sm sm:text-base truncate" v-text="selectedPreview.title"></h3>
+        <!-- 詳細モーダルヘッダー（タイトル折り返し全表示） -->
+        <div class="px-4 py-3 bg-white border-b border-slate-100 flex items-start justify-between gap-2 shrink-0">
+          <h3 class="font-bold text-slate-800 text-sm sm:text-base break-words whitespace-normal leading-snug flex-1 min-w-0 py-1" v-text="selectedPreview.title"></h3>
           <div class="flex items-center space-x-1 shrink-0">
             <button 
               @click="openEditFromDetail(selectedPreview)" 
@@ -233,11 +302,18 @@
               </button>
             </div>
 
-            <!-- 印刷期限 -->
-            <div v-if="selectedPreview.expire_date" class="flex items-center gap-2 text-xs text-slate-600 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200/60">
-              <i data-lucide="calendar" class="w-4 h-4 text-emerald-600 shrink-0"></i>
-              <span class="font-medium">印刷期限:</span>
-              <span class="font-mono font-semibold text-slate-800" v-text="selectedPreview.expire_date"></span>
+            <!-- 登録日・印刷期限メタ行 -->
+            <div class="flex flex-wrap gap-2">
+              <div v-if="selectedPreview.created_at" class="flex items-center gap-1.5 text-xs text-slate-600 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200/60">
+                <i data-lucide="clock" class="w-3.5 h-3.5 text-slate-400 shrink-0"></i>
+                <span class="text-slate-500">登録:</span>
+                <span class="font-mono font-medium text-slate-700" v-text="formatCreatedAt(selectedPreview.created_at)"></span>
+              </div>
+              <div v-if="selectedPreview.expire_date" class="flex items-center gap-1.5 text-xs text-slate-600 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200/60">
+                <i data-lucide="calendar" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i>
+                <span class="text-slate-500">印刷期限:</span>
+                <span class="font-mono font-semibold text-slate-800" v-text="selectedPreview.expire_date"></span>
+              </div>
             </div>
 
             <!-- 説明 / 印刷設定メモ -->
@@ -246,17 +322,23 @@
               <p class="text-xs sm:text-sm text-slate-700 whitespace-pre-wrap bg-slate-50 p-3 rounded-xl border border-slate-100 leading-relaxed select-text" v-text="selectedPreview.description"></p>
             </div>
 
-            <!-- タグ一覧（タップでそのタグで絞り込み） -->
-            <div v-if="selectedPreview.tags && selectedPreview.tags.length > 0" class="space-y-1.5 pt-1">
-              <span class="text-[11px] font-semibold text-slate-400 block">タグ</span>
-              <div class="flex flex-wrap gap-1.5">
+            <!-- タグ一覧（検索アクションであることが直感的に伝わるインタラクティブピル） -->
+            <div v-if="selectedPreview.tags && selectedPreview.tags.length > 0" class="space-y-2 pt-1">
+              <div class="flex items-center gap-1 text-[11px] font-semibold text-slate-400">
+                <i data-lucide="tag" class="w-3 h-3"></i>
+                <span>タグ</span>
+              </div>
+              <div class="flex flex-wrap gap-2">
                 <button 
                   v-for="t in selectedPreview.tags" 
                   :key="t" 
                   @click="filterByTagFromModal(t)"
-                  class="text-xs bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 px-2.5 py-1 rounded-lg font-medium transition"
-                  v-text="'#' + t"
-                ></button>
+                  class="group inline-flex items-center gap-1.5 text-xs bg-emerald-50/70 hover:bg-emerald-600 text-emerald-800 hover:text-white border border-emerald-200/90 hover:border-emerald-600 pl-2.5 pr-2 py-1.5 rounded-full font-semibold shadow-2xs active:scale-95 transition"
+                >
+                  <i data-lucide="search" class="w-3 h-3 text-emerald-600 group-hover:text-white transition-colors"></i>
+                  <span v-text="'#' + t"></span>
+                  <i data-lucide="chevron-right" class="w-3 h-3 text-emerald-400 group-hover:text-white/90 -ml-0.5 transition-colors"></i>
+                </button>
               </div>
             </div>
 
@@ -272,9 +354,9 @@
       @click.self="closeModal()"
       @paste="handlePaste"
     >
-      <div class="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-lg w-full overflow-hidden flex flex-col my-auto">
+      <div class="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-lg w-full overflow-hidden flex flex-col my-auto max-h-[92vh]">
         <!-- モーダルヘッダー -->
-        <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+        <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
           <h3 class="font-semibold text-slate-800 text-base" v-text="isEditing ? 'プリント情報の編集' : '新規プリント登録'"></h3>
           <button @click="closeModal()" class="min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-400 hover:text-slate-600 rounded-lg">
             <i data-lucide="x" class="w-5 h-5"></i>
@@ -282,7 +364,7 @@
         </div>
 
         <!-- フォーム本体 -->
-        <form @submit.prevent="savePrint" class="p-6 space-y-4">
+        <form @submit.prevent="savePrint" class="p-6 space-y-4 overflow-y-auto flex-1">
           <!-- 画像選択/貼り付けボタンエリア -->
           <div>
             <div class="flex items-center justify-between mb-1.5">
@@ -301,7 +383,7 @@
 
             <div 
               @click="$refs.fileInput.click()" 
-              class="border-2 border-dashed border-slate-200 hover:border-emerald-400 rounded-xl p-4 text-center cursor-pointer bg-slate-50/50 hover:bg-emerald-50/20 transition flex flex-col items-center justify-center min-h-[140px]"
+              class="border-2 border-dashed border-slate-200 hover:border-emerald-400 rounded-xl p-4 text-center cursor-pointer bg-slate-50/50 hover:bg-emerald-50/20 transition flex flex-col items-center justify-center min-h-[130px]"
             >
               <input 
                 type="file" 
@@ -357,20 +439,60 @@
             >
           </div>
 
-          <!-- タグ登録 -->
-          <div>
-            <label class="block text-xs font-medium text-slate-700 mb-1">タグ (スペースまたはカンマ区切りで複数登録可)</label>
+          <!-- タグ登録（既存タグのプルダウン＆チップ選択 ＋ 新規自由入力） -->
+          <div class="space-y-2">
+            <label class="block text-xs font-medium text-slate-700">タグ (既存のタグから選択、または新規入力)</label>
+            
+            <!-- 既存タグプルダウン & ワンタップチップ (表記ゆれ防止) -->
+            <div v-if="allSavedTagsForForm.length > 0" class="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 space-y-2">
+              <div class="flex items-center gap-2">
+                <div class="relative flex-1">
+                  <select 
+                    @change="handleSelectExistingTag" 
+                    class="w-full pl-3 pr-8 py-2 bg-white border border-slate-200 rounded-lg text-xs text-slate-700 focus:outline-none focus:border-emerald-500 appearance-none"
+                  >
+                    <option value="">＋ 既存のタグをプルダウンから選ぶ...</option>
+                    <option 
+                      v-for="item in allSavedTagsForForm" 
+                      :key="item.name" 
+                      :value="item.name"
+                      v-text="`#${item.name} (${item.count}件)`"
+                    ></option>
+                  </select>
+                  <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+                </div>
+              </div>
+
+              <!-- よく使うタグのクイック選択チップ -->
+              <div class="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto no-scrollbar pt-0.5">
+                <button
+                  type="button"
+                  v-for="item in allSavedTagsForForm"
+                  :key="item.name"
+                  @click="toggleTagInForm(item.name)"
+                  :class="isTagInForm(item.name) ? 'bg-emerald-600 text-white border-emerald-600 font-semibold' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'"
+                  class="px-2.5 py-1 rounded-lg text-[11px] border transition flex items-center gap-1 active:scale-95"
+                >
+                  <i :data-lucide="isTagInForm(item.name) ? 'check' : 'plus'" class="w-3 h-3"></i>
+                  <span v-text="item.name"></span>
+                </button>
+              </div>
+            </div>
+
+            <!-- 自由入力欄（新規タグもそのまま追加可能） -->
             <input 
               v-model="formData.tagsInput" 
               type="text" 
-              placeholder="例: イラスト 写真 A4 チラシ" 
+              placeholder="新規タグを入力 (スペースやカンマ区切りで複数可)" 
               class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
             >
           </div>
 
           <!-- 有効期限 -->
           <div>
-            <label class="block text-xs font-medium text-slate-700 mb-1">印刷期限 (任意)</label>
+            <label class="block text-xs font-medium text-slate-700 mb-1">
+              印刷期限 (任意・設定した日付になると一覧から自動で非表示になります)
+            </label>
             <input 
               v-model="formData.expire_date" 
               type="date" 
@@ -465,9 +587,15 @@
       setup() {
         const db = ref(null);
         const prints = ref([]);
-        const searchQuery = ref('');
         const selectedTag = ref('');
+        const selectedMonth = ref('');
         const isTagAccordionOpen = ref(false);
+        const isMonthAccordionOpen = ref(false);
+        
+        // グリッド列数（デフォルト2列、ローカルストレージから復元）
+        const savedCols = Number(localStorage.getItem('netprint_grid_cols'));
+        const gridCols = ref([1, 2, 3].includes(savedCols) ? savedCols : 2);
+
         const isModalOpen = ref(false);
         const isEditing = ref(false);
         const isLoading = ref(true);
@@ -496,6 +624,14 @@
           });
         };
 
+        const setGridCols = (col) => {
+          gridCols.value = col;
+          try {
+            localStorage.setItem('netprint_grid_cols', String(col));
+          } catch (e) {}
+          renderIcons();
+        };
+
         const showToast = (msg) => {
           toastMessage.value = msg;
           renderIcons();
@@ -503,6 +639,30 @@
             toastMessage.value = '';
           }, 3000);
         };
+
+        // 今日のローカル日付文字列 (YYYY-MM-DD) を取得
+        const getTodayDateString = () => {
+          const now = new Date();
+          const y = now.getFullYear();
+          const m = String(now.getMonth() + 1).padStart(2, '0');
+          const d = String(now.getDate()).padStart(2, '0');
+          return `${y}-${m}-${d}`;
+        };
+
+        // 印刷期限の日になっている（または過ぎている）かを判定
+        // expire_date が設定されており、今日の日付が expire_date 当日以降 (today >= expire_date) の場合は非表示対象
+        const isExpiredPrint = (item) => {
+          if (!item || !item.expire_date) return false;
+          const expireStr = String(item.expire_date).trim().slice(0, 10);
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(expireStr)) return false;
+          const todayStr = getTodayDateString();
+          return todayStr >= expireStr;
+        };
+
+        // 有効な（印刷期限が来ていない）プリント一覧
+        const activePrints = computed(() => {
+          return prints.value.filter(p => !isExpiredPrint(p));
+        });
 
         const syncToIndexedDB = async (items) => {
           if (!db.value) return;
@@ -577,7 +737,11 @@
                   prints.value[index] = payload.new;
                 }
                 if (selectedPreview.value && selectedPreview.value.id === payload.new.id) {
-                  selectedPreview.value = payload.new;
+                  if (isExpiredPrint(payload.new)) {
+                    selectedPreview.value = null;
+                  } else {
+                    selectedPreview.value = payload.new;
+                  }
                 }
               } else if (payload.eventType === 'DELETE') {
                 prints.value = prints.value.filter(p => p.id === payload.old.id);
@@ -666,6 +830,44 @@
           e.target.value = val;
         };
 
+        // フォーム内のタグ配列取得ヘルパー
+        const parseFormTags = () => {
+          return Array.from(new Set(
+            (formData.value.tagsInput || '')
+              .replace(/#/g, '')
+              .split(/[\s,、]+/)
+              .map(t => t.trim())
+              .filter(t => t.length > 0)
+          ));
+        };
+
+        const isTagInForm = (tagName) => {
+          return parseFormTags().includes(tagName);
+        };
+
+        const toggleTagInForm = (tagName) => {
+          const current = parseFormTags();
+          if (current.includes(tagName)) {
+            formData.value.tagsInput = current.filter(t => t !== tagName).join(' ');
+          } else {
+            current.push(tagName);
+            formData.value.tagsInput = current.join(' ');
+          }
+          renderIcons();
+        };
+
+        const handleSelectExistingTag = (e) => {
+          const val = e.target.value;
+          if (!val) return;
+          const current = parseFormTags();
+          if (!current.includes(val)) {
+            current.push(val);
+            formData.value.tagsInput = current.join(' ');
+          }
+          e.target.value = '';
+          renderIcons();
+        };
+
         const openModal = () => {
           isEditing.value = false;
           previewImage.value = '';
@@ -728,6 +930,7 @@
         const filterByTagFromModal = (tag) => {
           selectedTag.value = tag;
           selectedPreview.value = null;
+          showToast(`「#${tag}」で絞り込みました`);
         };
 
         const uploadImageToSupabase = async (file) => {
@@ -762,13 +965,7 @@
             return;
           }
 
-          const tags = Array.from(new Set(
-            (formData.value.tagsInput || '')
-              .replace(/#/g, '')
-              .split(/[\s,、]+/)
-              .map(t => t.trim())
-              .filter(t => t.length > 0)
-          ));
+          const tags = parseFormTags();
 
           isSubmitting.value = true;
 
@@ -869,47 +1066,112 @@
           renderIcons();
         };
 
-        const formatDate = (dateStr) => {
-          if (!dateStr) return '';
-          const parts = dateStr.split('-');
-          if (parts.length === 3) return `${parts[1]}/${parts[2]}`;
-          return dateStr;
+        // created_at から YYYY-MM を抽出するヘルパー
+        const extractYearMonth = (dateStr) => {
+          if (!dateStr) return null;
+          const d = new Date(dateStr);
+          if (isNaN(d.getTime())) return null;
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          return `${y}-${m}`;
         };
 
-        const allExistingTags = computed(() => {
-          const set = new Set();
-          prints.value.forEach(p => {
+        const formatMonthLabel = (ymKey) => {
+          if (!ymKey) return '';
+          const [y, m] = ymKey.split('-');
+          return `${y}年${Number(m)}月`;
+        };
+
+        const formatCreatedAt = (dateStr) => {
+          if (!dateStr) return '';
+          const d = new Date(dateStr);
+          if (isNaN(d.getTime())) return '';
+          return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+        };
+
+        // 有効な（期限切れでない）プリントから、タグを件数の多い順にソート
+        const sortedTagsWithCount = computed(() => {
+          const countMap = new Map();
+          activePrints.value.forEach(p => {
             if (Array.isArray(p.tags)) {
-              p.tags.forEach(t => set.add(t));
+              p.tags.forEach(t => {
+                countMap.set(t, (countMap.get(t) || 0) + 1);
+              });
             }
           });
-          return Array.from(set);
+          return Array.from(countMap.entries())
+            .map(([name, count]) => ({ name, count }))
+            .sort((a, b) => b.count - a.count);
+        });
+
+        // 新規登録フォーム用：過去に一度でも登録された全タグ（表記ゆれ防止用）
+        const allSavedTagsForForm = computed(() => {
+          const countMap = new Map();
+          prints.value.forEach(p => {
+            if (Array.isArray(p.tags)) {
+              p.tags.forEach(t => {
+                countMap.set(t, (countMap.get(t) || 0) + 1);
+              });
+            }
+          });
+          return Array.from(countMap.entries())
+            .map(([name, count]) => ({ name, count }))
+            .sort((a, b) => b.count - a.count);
+        });
+
+        // 有効な（期限切れでない）プリントの登録日時(created_at)から月別リストを新しい月順で集計
+        const sortedMonthsWithCount = computed(() => {
+          const countMap = new Map();
+          activePrints.value.forEach(p => {
+            const ym = extractYearMonth(p.created_at);
+            if (ym) {
+              countMap.set(ym, (countMap.get(ym) || 0) + 1);
+            }
+          });
+          return Array.from(countMap.entries())
+            .map(([key, count]) => ({
+              key,
+              label: formatMonthLabel(key),
+              count
+            }))
+            .sort((a, b) => b.key.localeCompare(a.key));
         });
 
         const toggleTagAccordion = () => {
           isTagAccordionOpen.value = !isTagAccordionOpen.value;
+          if (isTagAccordionOpen.value) isMonthAccordionOpen.value = false;
+          renderIcons();
+        };
+
+        const toggleMonthAccordion = () => {
+          isMonthAccordionOpen.value = !isMonthAccordionOpen.value;
+          if (isMonthAccordionOpen.value) isTagAccordionOpen.value = false;
           renderIcons();
         };
 
         const toggleTagFilter = (tag) => {
           selectedTag.value = (selectedTag.value === tag) ? '' : tag;
+          isTagAccordionOpen.value = false;
         };
 
-        const filteredPrints = computed(() => {
-          const q = searchQuery.value.trim().toLowerCase();
-          const targetTag = selectedTag.value;
+        const toggleMonthFilter = (ymKey) => {
+          selectedMonth.value = (selectedMonth.value === ymKey) ? '' : ymKey;
+          isMonthAccordionOpen.value = false;
+        };
 
-          return prints.value.filter(p => {
+        // 期限切れを除外した activePrints に対して、タグと登録月の絞り込みを適用
+        const filteredPrints = computed(() => {
+          const targetTag = selectedTag.value;
+          const targetMonth = selectedMonth.value;
+
+          return activePrints.value.filter(p => {
             if (targetTag && (!p.tags || !p.tags.includes(targetTag))) {
               return false;
             }
 
-            if (q) {
-              const matchTitle = (p.title || '').toLowerCase().includes(q);
-              const matchNumber = (p.print_number || '').includes(q);
-              const matchDesc = (p.description || '').toLowerCase().includes(q);
-              const matchTag = p.tags && p.tags.some(t => t.toLowerCase().includes(q));
-              return matchTitle || matchNumber || matchDesc || matchTag;
+            if (targetMonth) {
+              const ym = extractYearMonth(p.created_at);
+              if (ym !== targetMonth) return false;
             }
 
             return true;
@@ -928,10 +1190,15 @@
 
         return {
           prints,
-          searchQuery,
+          gridCols,
+          setGridCols,
           selectedTag,
+          selectedMonth,
           isTagAccordionOpen,
-          allExistingTags,
+          isMonthAccordionOpen,
+          sortedTagsWithCount,
+          allSavedTagsForForm,
+          sortedMonthsWithCount,
           filteredPrints,
           isModalOpen,
           isEditing,
@@ -948,6 +1215,9 @@
           deleteFromDetail,
           copyPrintNumber,
           filterByTagFromModal,
+          isTagInForm,
+          toggleTagInForm,
+          handleSelectExistingTag,
           savePrint,
           confirmDelete,
           handleFileUpload,
@@ -956,9 +1226,12 @@
           handlePrintNumberInput,
           handleTextareaKeydown,
           viewDetail,
-          formatDate,
+          formatMonthLabel,
+          formatCreatedAt,
           toggleTagAccordion,
-          toggleTagFilter
+          toggleMonthAccordion,
+          toggleTagFilter,
+          toggleMonthFilter
         };
       }
     }).mount('#app');
