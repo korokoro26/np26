@@ -41,6 +41,65 @@
       -ms-overflow-style: none;
       scrollbar-width: none;
     }
+
+    /* =========================================================================
+       【改善実装】画像には一切影響を与えず、「枠の周囲と外周グローのみ」を
+       ゲーミングカラーで光らせるスタイル（overflow-hiddenによる切り落としを回避し、
+       画像コンテナと外周リング・グローレイヤーを構造的に分離）
+       ========================================================================= */
+    @keyframes gamingGlowPulse {
+      0%, 100% {
+        box-shadow:
+          0 0 0 2px rgba(255, 42, 133, 0.9),
+          0 0 12px rgba(255, 42, 133, 0.65),
+          0 0 24px rgba(0, 229, 255, 0.45);
+      }
+      50% {
+        box-shadow:
+          0 0 0 2px rgba(0, 229, 255, 0.95),
+          0 0 16px rgba(0, 229, 255, 0.75),
+          0 0 30px rgba(157, 78, 221, 0.55);
+      }
+    }
+
+    @keyframes gamingRingSlide {
+      0% {
+        background-position: 0% 50%;
+      }
+      50% {
+        background-position: 100% 50%;
+      }
+      100% {
+        background-position: 0% 50%;
+      }
+    }
+
+    /* 一覧タイル枠の外周リング（画像には非干渉） */
+    .gaming-tile-outer {
+      position: relative;
+      z-index: 15;
+      border-radius: 0.75rem; /* rounded-xl */
+      padding: 3px; /* 枠線の周囲の太さ */
+      background: linear-gradient(120deg, #ff2a85, #ff9900, #ffee00, #00e676, #00e5ff, #9d4edd, #ff2a85);
+      background-size: 300% 300%;
+      animation: gamingRingSlide 3.6s ease infinite, gamingGlowPulse 2.4s ease-in-out infinite;
+    }
+
+    /* モーダル枠の外周リング（画像・内部コンテンツには非干渉） */
+    .gaming-modal-outer {
+      position: relative;
+      border-radius: 1rem; /* rounded-2xl */
+      padding: 3.5px; /* モーダル周囲の枠太さ */
+      background: linear-gradient(120deg, #ff2a85, #ff9900, #ffee00, #00e676, #00e5ff, #9d4edd, #ff2a85);
+      background-size: 300% 300%;
+      animation: gamingRingSlide 3.6s ease infinite, gamingGlowPulse 2.4s ease-in-out infinite;
+    }
+
+    .gaming-pill-accent {
+      background: linear-gradient(90deg, #ff2a85, #ff9900, #00e676, #00e5ff, #9d4edd);
+      background-size: 250% 250%;
+      animation: gamingRingSlide 3.6s ease infinite;
+    }
   </style>
 </head>
 <body class="bg-slate-50 text-slate-900 min-h-screen antialiased flex flex-col">
@@ -54,7 +113,7 @@
         <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-white shadow-xs">
           <i data-lucide="printer" class="w-4 h-4"></i>
         </div>
-        <span class="hidden sm:inline text-[10px] text-slate-300 font-mono tracking-tighter select-none">v1.7.0</span>
+        <span class="hidden sm:inline text-[10px] text-slate-300 font-mono tracking-tighter select-none">v1.7.4</span>
       </div>
 
       <!-- 中央：グリッド列数切り替え (1列 / 2列 / 3列 - 折り返し完全防止) -->
@@ -198,23 +257,36 @@
           gridCols === 1 ? 'grid-cols-1 gap-3.5' : (gridCols === 2 ? 'grid-cols-2 gap-2.5' : 'grid-cols-3 gap-1.5 sm:gap-2.5')
         ]"
       >
+        <!-- 外周リング＆グロー用ラッパー（要確認対象のみ gaming-tile-outer を付与） -->
         <div 
           v-for="item in filteredPrints" 
           :key="item.id" 
           @click="viewDetail(item)"
-          :class="[
-            'relative bg-white border border-slate-200/80 rounded-xl overflow-hidden cursor-pointer group select-none shadow-2xs flex items-center justify-center',
-            gridCols === 1 ? 'p-2.5 aspect-[16/11]' : (gridCols === 2 ? 'p-1.5 aspect-[4/3]' : 'p-1 aspect-[4/3]')
-          ]"
+          :class="isHighlightedForUser(item) ? 'gaming-tile-outer cursor-pointer select-none' : 'cursor-pointer select-none'"
         >
-          <img 
-            :src="item.image_url" 
-            :alt="item.title" 
-            class="w-full h-full object-contain group-hover:scale-[1.03] active:scale-95 transition duration-200"
-            loading="lazy"
+          <!-- 通常の画像カード本体（画像領域は overflow-hidden で独立） -->
+          <div 
+            :class="[
+              'relative w-full h-full bg-white border border-slate-200/80 rounded-[10px] overflow-hidden group shadow-2xs flex items-center justify-center',
+              gridCols === 1 ? 'p-2.5 aspect-[16/11]' : (gridCols === 2 ? 'p-1.5 aspect-[4/3]' : 'p-1 aspect-[4/3]')
+            ]"
           >
-          <!-- ホバー・タッチ時のフィードバック -->
-          <div class="absolute inset-0 bg-black/0 group-hover:bg-black/5 active:bg-black/15 transition-colors pointer-events-none"></div>
+            <img 
+              :src="item.image_url" 
+              :alt="item.title" 
+              class="w-full h-full object-contain group-hover:scale-[1.03] active:scale-95 transition duration-200"
+              loading="lazy"
+            >
+            <!-- 枠の重要度バッジ（角に配置し画像中央を遮らない） -->
+            <div 
+              v-if="isHighlightedForUser(item)"
+              class="gaming-pill-accent absolute top-1.5 left-1.5 z-20 px-2 py-0.5 rounded-full text-[10px] font-extrabold text-white shadow-sm pointer-events-none"
+            >
+              要確認
+            </div>
+            <!-- ホバー・タッチ時のフィードバック -->
+            <div class="absolute inset-0 bg-black/0 group-hover:bg-black/5 active:bg-black/15 transition-colors pointer-events-none"></div>
+          </div>
         </div>
       </section>
 
@@ -236,112 +308,128 @@
       </section>
     </main>
 
-    <!-- 画像タップ時の詳細・ネットプリント番号モーダル -->
+    <!-- 画像タップ時の詳細・ネットプリント番号モーダル（枠周囲のみゲーミング発光・画像には非干渉） -->
     <div 
       v-if="selectedPreview" 
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-3 sm:p-4 animate-fade-in"
       @click.self="selectedPreview = null"
     >
-      <div class="relative max-w-lg w-full max-h-[90vh] bg-white rounded-2xl overflow-hidden shadow-2xl flex flex-col">
-        
-        <!-- 詳細モーダルヘッダー（タイトル折り返し全表示） -->
-        <div class="px-4 py-3 bg-white border-b border-slate-100 flex items-start justify-between gap-2 shrink-0">
-          <h3 class="font-bold text-slate-800 text-sm sm:text-base break-words whitespace-normal leading-snug flex-1 min-w-0 py-1" v-text="selectedPreview.title"></h3>
-          <div class="flex items-center space-x-1 shrink-0">
-            <button 
-              @click="openEditFromDetail(selectedPreview)" 
-              class="min-h-[40px] min-w-[40px] flex items-center justify-center text-slate-500 hover:text-emerald-600 hover:bg-slate-100 rounded-xl transition" 
-              title="編集"
-            >
-              <i data-lucide="edit-3" class="w-4 h-4"></i>
-            </button>
-            <button 
-              @click="deleteFromDetail(selectedPreview.id, selectedPreview.image_url)" 
-              class="min-h-[40px] min-w-[40px] flex items-center justify-center text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition" 
-              title="削除"
-            >
-              <i data-lucide="trash-2" class="w-4 h-4"></i>
-            </button>
-            <div class="w-px h-5 bg-slate-200 mx-0.5"></div>
-            <button 
-              @click="selectedPreview = null" 
-              class="min-h-[40px] min-w-[40px] flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition" 
-              title="閉じる"
-            >
-              <i data-lucide="x" class="w-5 h-5"></i>
-            </button>
-          </div>
-        </div>
-
-        <!-- スクロール可能なコンテンツ領域 -->
-        <div class="overflow-y-auto flex-1 flex flex-col">
-          <!-- フル画像プレビュー -->
-          <div class="bg-slate-950 flex items-center justify-center min-h-[220px] max-h-[50vh] p-2 relative">
-            <img 
-              :src="selectedPreview.image_url" 
-              :alt="selectedPreview.title" 
-              class="max-h-[48vh] max-w-full object-contain rounded"
-            >
-          </div>
-
-          <!-- ネットプリント予約番号 & メタ詳細 -->
-          <div class="p-4 sm:p-5 space-y-4 bg-white">
-            
-            <!-- 予約番号ボックス (ワンタップコピー機能付き) -->
-            <div class="bg-emerald-50/70 border border-emerald-200/80 rounded-2xl p-3.5 flex items-center justify-between">
-              <div>
-                <span class="text-[10px] uppercase font-bold tracking-wider text-emerald-700 block mb-0.5">プリント予約番号 (8桁)</span>
-                <span class="font-mono text-2xl sm:text-3xl font-extrabold tracking-widest text-emerald-800 select-all" v-text="selectedPreview.print_number"></span>
+      <!-- モーダル外周のゲーミング枠ラッパー -->
+      <div 
+        :class="[
+          'relative max-w-lg w-full max-h-[90vh] flex flex-col',
+          selectedPreviewHasHighlight ? 'gaming-modal-outer' : ''
+        ]"
+      >
+        <!-- モーダル本体 -->
+        <div class="bg-white rounded-[13px] overflow-hidden shadow-2xl flex flex-col max-h-[calc(90vh-7px)] w-full">
+          
+          <!-- 詳細モーダルヘッダー（タイトル折り返し全表示） -->
+          <div class="px-4 py-3 bg-white border-b border-slate-100 flex items-start justify-between gap-2 shrink-0">
+            <div class="flex-1 min-w-0 py-1">
+              <div v-if="selectedPreviewHasHighlight" class="mb-1">
+                <span class="gaming-pill-accent inline-block px-2 py-0.5 rounded-full text-[10px] font-extrabold text-white">
+                  タップして開く重要モーダル
+                </span>
               </div>
+              <h3 class="font-bold text-slate-800 text-sm sm:text-base break-words whitespace-normal leading-snug" v-text="selectedPreview.title"></h3>
+            </div>
+            <div class="flex items-center space-x-1 shrink-0">
               <button 
-                @click="copyPrintNumber(selectedPreview.print_number)"
-                class="min-h-[44px] px-3.5 py-2 bg-white hover:bg-emerald-600 text-emerald-700 hover:text-white border border-emerald-200 rounded-xl text-xs font-semibold shadow-2xs transition active:scale-95 flex items-center gap-1.5"
+                @click="openEditFromDetail(selectedPreview)" 
+                class="min-h-[40px] min-w-[40px] flex items-center justify-center text-slate-500 hover:text-emerald-600 hover:bg-slate-100 rounded-xl transition" 
+                title="編集"
               >
-                <i data-lucide="copy" class="w-4 h-4"></i>
-                <span>コピー</span>
+                <i data-lucide="edit-3" class="w-4 h-4"></i>
+              </button>
+              <button 
+                @click="deleteFromDetail(selectedPreview.id, selectedPreview.image_url)" 
+                class="min-h-[40px] min-w-[40px] flex items-center justify-center text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition" 
+                title="削除"
+              >
+                <i data-lucide="trash-2" class="w-4 h-4"></i>
+              </button>
+              <div class="w-px h-5 bg-slate-200 mx-0.5"></div>
+              <button 
+                @click="selectedPreview = null" 
+                class="min-h-[40px] min-w-[40px] flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition" 
+                title="閉じる"
+              >
+                <i data-lucide="x" class="w-5 h-5"></i>
               </button>
             </div>
+          </div>
 
-            <!-- 登録日・印刷期限メタ行 -->
-            <div class="flex flex-wrap gap-2">
-              <div v-if="selectedPreview.created_at" class="flex items-center gap-1.5 text-xs text-slate-600 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200/60">
-                <i data-lucide="clock" class="w-3.5 h-3.5 text-slate-400 shrink-0"></i>
-                <span class="text-slate-500">登録:</span>
-                <span class="font-mono font-medium text-slate-700" v-text="formatCreatedAt(selectedPreview.created_at)"></span>
-              </div>
-              <div v-if="selectedPreview.expire_date" class="flex items-center gap-1.5 text-xs text-slate-600 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200/60">
-                <i data-lucide="calendar" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i>
-                <span class="text-slate-500">印刷期限:</span>
-                <span class="font-mono font-semibold text-slate-800" v-text="selectedPreview.expire_date"></span>
-              </div>
+          <!-- スクロール可能なコンテンツ領域 -->
+          <div class="overflow-y-auto flex-1 flex flex-col">
+            <!-- フル画像プレビュー（画像自体にフィルター・光彩効果は適用しない） -->
+            <div class="bg-slate-950 flex items-center justify-center min-h-[220px] max-h-[50vh] p-2 relative">
+              <img 
+                :src="selectedPreview.image_url" 
+                :alt="selectedPreview.title" 
+                class="max-h-[48vh] max-w-full object-contain rounded"
+              >
             </div>
 
-            <!-- 説明 / 印刷設定メモ -->
-            <div v-if="selectedPreview.description" class="space-y-1">
-              <span class="text-[11px] font-semibold text-slate-400 block">説明・メモ</span>
-              <p class="text-xs sm:text-sm text-slate-700 whitespace-pre-wrap bg-slate-50 p-3 rounded-xl border border-slate-100 leading-relaxed select-text" v-text="selectedPreview.description"></p>
-            </div>
-
-            <!-- タグ一覧（検索アクションであることが直感的に伝わるインタラクティブピル） -->
-            <div v-if="selectedPreview.tags && selectedPreview.tags.length > 0" class="space-y-2 pt-1">
-              <div class="flex items-center gap-1 text-[11px] font-semibold text-slate-400">
-                <i data-lucide="tag" class="w-3 h-3"></i>
-                <span>タグ</span>
-              </div>
-              <div class="flex flex-wrap gap-2">
+            <!-- ネットプリント予約番号 & メタ詳細 -->
+            <div class="p-4 sm:p-5 space-y-4 bg-white">
+              
+              <!-- 予約番号ボックス (ワンタップコピー機能付き) -->
+              <div class="bg-emerald-50/70 border border-emerald-200/80 rounded-2xl p-3.5 flex items-center justify-between">
+                <div>
+                  <span class="text-[10px] uppercase font-bold tracking-wider text-emerald-700 block mb-0.5">プリント予約番号 (8桁)</span>
+                  <span class="font-mono text-2xl sm:text-3xl font-extrabold tracking-widest text-emerald-800 select-all" v-text="selectedPreview.print_number"></span>
+                </div>
                 <button 
-                  v-for="t in selectedPreview.tags" 
-                  :key="t" 
-                  @click="filterByTagFromModal(t)"
-                  class="group inline-flex items-center gap-1.5 text-xs bg-emerald-50/70 hover:bg-emerald-600 text-emerald-800 hover:text-white border border-emerald-200/90 hover:border-emerald-600 pl-2.5 pr-2 py-1.5 rounded-full font-semibold shadow-2xs active:scale-95 transition"
+                  @click="copyPrintNumber(selectedPreview.print_number)"
+                  class="min-h-[44px] px-3.5 py-2 bg-white hover:bg-emerald-600 text-emerald-700 hover:text-white border border-emerald-200 rounded-xl text-xs font-semibold shadow-2xs transition active:scale-95 flex items-center gap-1.5"
                 >
-                  <i data-lucide="search" class="w-3 h-3 text-emerald-600 group-hover:text-white transition-colors"></i>
-                  <span v-text="'#' + t"></span>
-                  <i data-lucide="chevron-right" class="w-3 h-3 text-emerald-400 group-hover:text-white/90 -ml-0.5 transition-colors"></i>
+                  <i data-lucide="copy" class="w-4 h-4"></i>
+                  <span>コピー</span>
                 </button>
               </div>
-            </div>
 
+              <!-- 登録日・印刷期限メタ行 -->
+              <div class="flex flex-wrap gap-2">
+                <div v-if="selectedPreview.created_at" class="flex items-center gap-1.5 text-xs text-slate-600 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200/60">
+                  <i data-lucide="clock" class="w-3.5 h-3.5 text-slate-400 shrink-0"></i>
+                  <span class="text-slate-500">登録:</span>
+                  <span class="font-mono font-medium text-slate-700" v-text="formatCreatedAt(selectedPreview.created_at)"></span>
+                </div>
+                <div v-if="selectedPreview.expire_date" class="flex items-center gap-1.5 text-xs text-slate-600 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200/60">
+                  <i data-lucide="calendar" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i>
+                  <span class="text-slate-500">印刷期限:</span>
+                  <span class="font-mono font-semibold text-slate-800" v-text="selectedPreview.expire_date"></span>
+                </div>
+              </div>
+
+              <!-- 説明 / 印刷設定メモ -->
+              <div v-if="selectedPreview.description" class="space-y-1">
+                <span class="text-[11px] font-semibold text-slate-400 block">説明・メモ</span>
+                <p class="text-xs sm:text-sm text-slate-700 whitespace-pre-wrap bg-slate-50 p-3 rounded-xl border border-slate-100 leading-relaxed select-text" v-text="selectedPreview.description"></p>
+              </div>
+
+              <!-- タグ一覧（検索アクションであることが直感的に伝わるインタラクティブピル） -->
+              <div v-if="selectedPreview.tags && selectedPreview.tags.length > 0" class="space-y-2 pt-1">
+                <div class="flex items-center gap-1 text-[11px] font-semibold text-slate-400">
+                  <i data-lucide="tag" class="w-3 h-3"></i>
+                  <span>タグ</span>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button 
+                    v-for="t in selectedPreview.tags" 
+                    :key="t" 
+                    @click="filterByTagFromModal(t)"
+                    class="group inline-flex items-center gap-1.5 text-xs bg-emerald-50/70 hover:bg-emerald-600 text-emerald-800 hover:text-white border border-emerald-200/90 hover:border-emerald-600 pl-2.5 pr-2 py-1.5 rounded-full font-semibold shadow-2xs active:scale-95 transition"
+                  >
+                    <i data-lucide="search" class="w-3 h-3 text-emerald-600 group-hover:text-white transition-colors"></i>
+                    <span v-text="'#' + t"></span>
+                    <i data-lucide="chevron-right" class="w-3 h-3 text-emerald-400 group-hover:text-white/90 -ml-0.5 transition-colors"></i>
+                  </button>
+                </div>
+              </div>
+
+            </div>
           </div>
         </div>
       </div>
@@ -513,6 +601,18 @@
             <span class="text-[10px] text-slate-400 block mt-0.5 text-right">送信: Shift + Enter</span>
           </div>
 
+          <!-- 【改善実装】編集時：枠の周囲と外周グローのみをゲーミングカラーで光らせるスイッチ -->
+          <div v-if="isEditing" class="bg-slate-50 border border-slate-200/80 rounded-xl p-3 flex items-center justify-between gap-3">
+            <div class="space-y-0.5">
+              <span class="block text-xs font-semibold text-slate-800">枠の周囲をゲーミングカラーで光らせる</span>
+              <span class="block text-[11px] text-slate-500">画像には影響せず枠線周囲と外周グローのみ発光させ、ユーザーにタップして開く重要性を伝えます</span>
+            </div>
+            <label class="inline-flex items-center cursor-pointer shrink-0">
+              <input type="checkbox" v-model="formData.highlight_for_user" class="sr-only peer">
+              <div class="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600 relative"></div>
+            </label>
+          </div>
+
           <!-- アクションボタン -->
           <div class="pt-3 flex items-center justify-end space-x-2">
             <button 
@@ -613,7 +713,21 @@
           image_url: '',
           expire_date: '',
           description: '',
-          created_at: null
+          created_at: null,
+          highlight_for_user: false
+        });
+
+        // 【改善実装】DB列の有無にかかわらず確実に保持・同期するためのローカルハイライトIDセット
+        const localHighlightIds = ref(new Set());
+
+        const isHighlightedForUser = (item) => {
+          if (!item) return false;
+          if (item.highlight_for_user === true) return true;
+          return localHighlightIds.value.has(item.id);
+        };
+
+        const selectedPreviewHasHighlight = computed(() => {
+          return isHighlightedForUser(selectedPreview.value);
         });
 
         const renderIcons = () => {
@@ -675,6 +789,20 @@
           }
         };
 
+        // 【改善実装】Supabase再取得時にもローカル保持中のハイライト状態をマージして見失わないようにする
+        const mergeHighlightState = (items) => {
+          return items.map(item => {
+            if (item.highlight_for_user === true) {
+              localHighlightIds.value.add(item.id);
+              return item;
+            }
+            if (localHighlightIds.value.has(item.id)) {
+              return { ...item, highlight_for_user: true };
+            }
+            return item;
+          });
+        };
+
         const loadPrints = async () => {
           // IndexedDBキャッシュ先行読み込み
           if (db.value) {
@@ -684,7 +812,7 @@
               const req = store.getAll();
               req.onsuccess = () => {
                 if (req.result && req.result.length > 0) {
-                  prints.value = req.result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                  prints.value = mergeHighlightState(req.result).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
                   isLoading.value = false;
                   renderIcons();
                 }
@@ -705,8 +833,9 @@
               if (error) throw error;
 
               if (data) {
-                prints.value = data;
-                syncToIndexedDB(data);
+                const merged = mergeHighlightState(data);
+                prints.value = merged;
+                syncToIndexedDB(merged);
               }
             } catch (err) {
               console.error(err);
@@ -880,7 +1009,8 @@
             image_url: '',
             expire_date: '',
             description: '',
-            created_at: null
+            created_at: null,
+            highlight_for_user: false
           };
           isModalOpen.value = true;
           renderIcons();
@@ -897,7 +1027,8 @@
           pendingImageFile.value = null;
           formData.value = {
             ...item,
-            tagsInput: item.tags ? item.tags.join(' ') : ''
+            tagsInput: item.tags ? item.tags.join(' ') : '',
+            highlight_for_user: true
           };
           isModalOpen.value = true;
           renderIcons();
@@ -976,30 +1107,49 @@
               finalImageUrl = await uploadImageToSupabase(pendingImageFile.value);
             }
 
+            const shouldHighlight = isEditing.value ? Boolean(formData.value.highlight_for_user) : false;
+
             const payload = {
               title: formData.value.title.trim(),
               print_number: formData.value.print_number,
               tags: tags,
               image_url: finalImageUrl,
               expire_date: formData.value.expire_date || null,
-              description: formData.value.description ? formData.value.description.trim() : ''
+              description: formData.value.description ? formData.value.description.trim() : '',
+              highlight_for_user: shouldHighlight
             };
 
             let savedData = null;
 
             if (isEditing.value) {
-              const { data, error } = await supabaseClient
+              let res = await supabaseClient
                 .from('prints')
                 .update(payload)
                 .eq('id', formData.value.id)
                 .select();
 
-              if (error) throw error;
-              savedData = data[0];
+              if (res.error && String(res.error.message || '').includes('highlight_for_user')) {
+                const { highlight_for_user, ...fallbackPayload } = payload;
+                res = await supabaseClient
+                  .from('prints')
+                  .update(fallbackPayload)
+                  .eq('id', formData.value.id)
+                  .select();
+              }
+
+              if (res.error) throw res.error;
+              savedData = { ...(res.data && res.data[0] ? res.data[0] : { ...formData.value, ...payload }), highlight_for_user: shouldHighlight };
+
+              if (shouldHighlight) {
+                localHighlightIds.value.add(savedData.id);
+              } else {
+                localHighlightIds.value.delete(savedData.id);
+              }
             } else {
+              const { highlight_for_user, ...insertPayload } = payload;
               const { data, error } = await supabaseClient
                 .from('prints')
-                .insert([payload])
+                .insert([insertPayload])
                 .select();
 
               if (error) throw error;
@@ -1046,6 +1196,8 @@
               const tx = db.value.transaction(STORE_NAME, 'readwrite');
               tx.objectStore(STORE_NAME).delete(id);
             }
+
+            localHighlightIds.value.delete(id);
 
             await loadPrints();
             showToast('削除しました');
@@ -1207,7 +1359,9 @@
           formData,
           previewImage,
           selectedPreview,
+          selectedPreviewHasHighlight,
           toastMessage,
+          isHighlightedForUser,
           openModal,
           closeModal,
           editPrint,
