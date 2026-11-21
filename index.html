@@ -329,7 +329,7 @@
             <div class="flex-1 min-w-0 py-1">
               <div v-if="selectedPreviewHasHighlight" class="mb-1">
                 <span class="gaming-pill-accent inline-block px-2 py-0.5 rounded-full text-[10px] font-extrabold text-white">
-                  タップして開く重要モーダル
+                  要確認
                 </span>
               </div>
               <h3 class="font-bold text-slate-800 text-sm sm:text-base break-words whitespace-normal leading-snug" v-text="selectedPreview.title"></h3>
@@ -605,7 +605,7 @@
           <div v-if="isEditing" class="bg-slate-50 border border-slate-200/80 rounded-xl p-3 flex items-center justify-between gap-3">
             <div class="space-y-0.5">
               <span class="block text-xs font-semibold text-slate-800">枠の周囲をゲーミングカラーで光らせる</span>
-              <span class="block text-[11px] text-slate-500">画像には影響せず枠線周囲と外周グローのみ発光させ、ユーザーにタップして開く重要性を伝えます</span>
+              <span class="block text-[11px] text-slate-500">画像には影響せず枠線周囲と外周グローのみ発光させ重要性を伝えます</span>
             </div>
             <label class="inline-flex items-center cursor-pointer shrink-0">
               <input type="checkbox" v-model="formData.highlight_for_user" class="sr-only peer">
