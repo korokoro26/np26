@@ -113,7 +113,7 @@
         <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-white shadow-xs">
           <i data-lucide="printer" class="w-4 h-4"></i>
         </div>
-        <span class="hidden sm:inline text-[10px] text-slate-300 font-mono tracking-tighter select-none">v1.7.4</span>
+        <span class="hidden sm:inline text-[10px] text-slate-300 font-mono tracking-tighter select-none">v1.7.5</span>
       </div>
 
       <!-- 中央：グリッド列数切り替え (1列 / 2列 / 3列 - 折り返し完全防止) -->
@@ -324,7 +324,7 @@
         <!-- モーダル本体 -->
         <div class="bg-white rounded-[13px] overflow-hidden shadow-2xl flex flex-col max-h-[calc(90vh-7px)] w-full">
           
-          <!-- 詳細モーダルヘッダー（タイトル折り返し全表示） -->
+          <!-- 詳細モーダルヘッダー（誤タップ防止のため削除アイコンを撤去し、編集画面内へ移動） -->
           <div class="px-4 py-3 bg-white border-b border-slate-100 flex items-start justify-between gap-2 shrink-0">
             <div class="flex-1 min-w-0 py-1">
               <div v-if="selectedPreviewHasHighlight" class="mb-1">
@@ -341,13 +341,6 @@
                 title="編集"
               >
                 <i data-lucide="edit-3" class="w-4 h-4"></i>
-              </button>
-              <button 
-                @click="deleteFromDetail(selectedPreview.id, selectedPreview.image_url)" 
-                class="min-h-[40px] min-w-[40px] flex items-center justify-center text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition" 
-                title="削除"
-              >
-                <i data-lucide="trash-2" class="w-4 h-4"></i>
               </button>
               <div class="w-px h-5 bg-slate-200 mx-0.5"></div>
               <button 
@@ -613,24 +606,37 @@
             </label>
           </div>
 
-          <!-- アクションボタン -->
-          <div class="pt-3 flex items-center justify-end space-x-2">
+          <!-- アクションボタン（編集時は左側に削除ボタンを配置） -->
+          <div class="pt-3 flex items-center justify-between gap-2 border-t border-slate-100">
             <button 
+              v-if="isEditing"
               type="button" 
-              @click="closeModal()" 
+              @click="deleteFromEdit()" 
               :disabled="isSubmitting"
-              class="min-h-[44px] px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl text-sm font-medium transition disabled:opacity-50"
+              class="min-h-[44px] px-3.5 py-2 text-rose-600 hover:bg-rose-50 border border-rose-200/80 rounded-xl text-sm font-medium transition active:scale-95 disabled:opacity-50 flex items-center gap-1.5"
             >
-              キャンセル
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+              <span>削除</span>
             </button>
-            <button 
-              type="submit" 
-              :disabled="isSubmitting"
-              class="min-h-[44px] px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-xl shadow-sm transition active:scale-95 disabled:opacity-50 flex items-center gap-1.5"
-            >
-              <div v-if="isSubmitting" class="animate-spin rounded-full h-3.5 w-3.5 border-2 border-white border-t-transparent"></div>
-              <span v-text="isSubmitting ? '保存中...' : (isEditing ? '更新する' : '保存する')"></span>
-            </button>
+
+            <div class="flex items-center space-x-2 ml-auto">
+              <button 
+                type="button" 
+                @click="closeModal()" 
+                :disabled="isSubmitting"
+                class="min-h-[44px] px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl text-sm font-medium transition disabled:opacity-50"
+              >
+                キャンセル
+              </button>
+              <button 
+                type="submit" 
+                :disabled="isSubmitting"
+                class="min-h-[44px] px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-xl shadow-sm transition active:scale-95 disabled:opacity-50 flex items-center gap-1.5"
+              >
+                <div v-if="isSubmitting" class="animate-spin rounded-full h-3.5 w-3.5 border-2 border-white border-t-transparent"></div>
+                <span v-text="isSubmitting ? '保存中...' : (isEditing ? '更新する' : '保存する')"></span>
+              </button>
+            </div>
           </div>
         </form>
       </div>
@@ -1028,7 +1034,7 @@
           formData.value = {
             ...item,
             tagsInput: item.tags ? item.tags.join(' ') : '',
-            highlight_for_user: true
+            highlight_for_user: isHighlightedForUser(item)
           };
           isModalOpen.value = true;
           renderIcons();
@@ -1040,10 +1046,14 @@
           editPrint(item);
         };
 
-        // 詳細モーダルから削除を実行
-        const deleteFromDetail = async (id, imageUrl) => {
-          await confirmDelete(id, imageUrl);
-          selectedPreview.value = null;
+        // 編集モーダルから削除を実行
+        const deleteFromEdit = async () => {
+          if (!formData.value.id) return;
+          const deleted = await confirmDelete(formData.value.id, formData.value.image_url);
+          if (deleted) {
+            isModalOpen.value = false;
+            selectedPreview.value = null;
+          }
         };
 
         // 予約番号のワンタップコピー
@@ -1172,7 +1182,8 @@
         };
 
         const confirmDelete = async (id, imageUrl) => {
-          if (!confirm('このプリント情報を削除してもよろしいですか？')) return;
+          if (!confirm('このプリント情報を削除してもよろしいですか？')) return false;
+          isSubmitting.value = true;
           try {
             const { error } = await supabaseClient
               .from('prints')
@@ -1201,8 +1212,12 @@
 
             await loadPrints();
             showToast('削除しました');
+            return true;
           } catch (err) {
             alert('通信エラーによる削除失敗: ' + (err.message || err));
+            return false;
+          } finally {
+            isSubmitting.value = false;
           }
         };
 
@@ -1366,7 +1381,7 @@
           closeModal,
           editPrint,
           openEditFromDetail,
-          deleteFromDetail,
+          deleteFromEdit,
           copyPrintNumber,
           filterByTagFromModal,
           isTagInForm,
